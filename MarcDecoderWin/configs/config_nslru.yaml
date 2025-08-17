@@ -1,0 +1,68 @@
+metadata:
+  experiment: 20250408_repcode_d3_simulated
+  run: nslru_lstm16x2_eval16_b64_dr0-10_lr0-001
+  init_weights: null
+
+dataset:
+  input_names: 
+    - "defects"
+    - "binary_outcomes"
+  basis: "Z"
+  distance: 3
+  train:
+    rounds: [5, 10, 15, 20, 25, 30, 35, 40]
+    states: ["000", "001", "010", "011", "100", "101", "110", "111"]
+    shots: 47500
+  folder_format_name: repcode_d{distance}_r{num_rounds}_s{state}_b{basis}
+  val:
+    rounds: [5, 10, 15, 20, 25, 30, 35, 40]
+    states: ["000", "001", "010", "011", "100", "101", "110", "111"]
+    shots: 2500
+  test:
+    rounds: !range [0, 70, 1]
+    states: ["000"]
+    shots: 10000
+train:
+  optimizer:
+    learning_rate: 0.001
+  loss:
+    aux_output: binary_crossentropy
+    main_output: binary_crossentropy
+  loss_weights:
+    main_output: 1.0
+    aux_output: 0.5
+  metrics:
+    aux_output: accuracy
+    main_output: accuracy
+  callbacks:
+    early_stop:
+      monitor: val_loss
+      mode: min
+      min_delta: 0
+      patience: 50
+    csv_log:
+      append: false
+    checkpoint:
+      monitor: val_loss
+      mode: min
+      save_best_only: true
+
+  epochs: 500
+  batch_size: 64
+
+model:
+  type: LSTM
+
+  LSTM:
+    units: [16, 16]
+    dropout_rates: [0.10, 0.10]
+
+  main_eval:
+    units: [16, 1]
+    dropout_rates: [0.10, null]
+    l2_factor: null
+
+  aux_eval:
+    units: [16, 1]
+    dropout_rates: [0.10, null]
+    l2_factor: null

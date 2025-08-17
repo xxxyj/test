@@ -1,0 +1,6 @@
+activate lru_preprocessing
+python plot_training_all.py
+activate lru_nn
+python evaluate_all.py
+activate lru_preprocessing
+python plot_evaluation_all.py

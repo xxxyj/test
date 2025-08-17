@@ -1,0 +1,70 @@
+metadata:
+  experiment: yuejie_data_rndflp
+  run: slru_lstm24x2_eval24_b64_dr0-10_lr0-001
+  init_weights: null
+
+dataset:
+  input_names: 
+    - "defects"
+    - "outcomes"
+    - "leakage_flags"
+  basis: "Z"
+  distance: 3
+  train:
+    rounds: [1,  2,  3,  4,  5,  7,  8, 11, 14, 17, 20, 26, 32, 41]
+    states: ["000", "001", "010", "011", "100", "101", "110", "111"]
+    shots: 70000
+  folder_format_name: repcode_d{distance}_r{num_rounds}_s{state}_b{basis}
+  val:
+    rounds: [1,  2,  3,  4,  5,  7,  8, 11, 14, 17, 20, 26, 32, 41]
+    states: ["000", "001", "010", "011", "100", "101", "110", "111"]
+    shots: 10000
+  test:
+    rounds: [1,  2,  3,  4,  5,  7,  8, 10, 13, 16, 21, 26, 33, 42, 53, 68, 87, 108]
+    states: ["010"]
+    shots: 10000
+train:
+  optimizer:
+    learning_rate: 0.001
+  loss:
+    aux_output: binary_crossentropy
+    main_output: binary_crossentropy
+  loss_weights:
+    main_output: 1.0
+    aux_output: 0.5
+  metrics:
+    aux_output: accuracy
+    main_output: accuracy
+  callbacks:
+    early_stop:
+      monitor: val_loss
+      mode: min
+      min_delta: 0
+      patience: 50
+    csv_log:
+      append: false
+    checkpoint:
+      monitor: val_loss
+      mode: min
+      save_best_only: true
+
+  epochs: 10
+  batch_size: 64
+
+model:
+  type: LSTM
+
+  LSTM:
+    units: [24, 24]
+    dropout_rates: [0.10, 0.10]
+
+  main_eval:
+    units: [24, 1]
+    dropout_rates: [0.10, null]
+    l2_factor: null
+
+  aux_eval:
+    units: [24, 1]
+    dropout_rates: [0.10, null]
+    l2_factor: null
+
