@@ -150,5 +150,5 @@ history = model.fit(
     steps_per_epoch=train_rec.shape[0] // batch_size,
     validation_steps=val_rec.shape[0] // batch_size,
 )
-model.save(config.checkpoint_dir / "final_weights.keras")
+model.save_weights(config.checkpoint_dir / "final_weights.h5")
 
