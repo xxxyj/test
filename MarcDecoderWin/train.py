@@ -91,9 +91,21 @@ def make_dataset(rec_input, eval_input, labels, training=False):
     dataset = tf.data.Dataset.from_tensor_slices(
         ({"rec_input": rec_input, "eval_input": eval_input}, labels)
     )
+    dataset = dataset.cache()
     if training:
         dataset = dataset.shuffle(len(labels)).repeat()
-    return dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+    dataset = dataset.batch(batch_size)
+
+    # Prefetch to GPU if available to hide host-to-device transfer latency
+    gpus = tf.config.list_physical_devices("GPU")
+    if gpus:
+        dataset = dataset.apply(
+            tf.data.experimental.copy_to_device("/GPU:0")
+        ).prefetch(tf.data.AUTOTUNE)
+    else:
+        dataset = dataset.prefetch(tf.data.AUTOTUNE)
+
+    return dataset
 
 
 # load model
