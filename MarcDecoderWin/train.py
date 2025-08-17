@@ -77,25 +77,39 @@ print("loading training data...")
 train_data = load_datasets(config=config, layout=layout, dataset_name="train")
 print("completed")
 
-# this is for model.fit to know that the num_rounds coordinate is not fixed
+# build tf.data pipeline
 batch_size = config.train["batch_size"]
-tensor1, tensor2 = train_data[0], train_data[-1]
-seq1, seq2 = Sequence(*tensor1, batch_size), Sequence(*tensor2, batch_size)
-first_batch, second_batch = seq1[0], seq2[0]
 
 
-def infinite_gen(inputs):
-    while True:
-        random.shuffle(train_data)
-        sequences = (Sequence(*tensors, batch_size) for tensors in inputs)
-        # this is for model.fit to know that the num_rounds coordinate is not fixed
-        yield first_batch
-        yield second_batch
+def make_dataset(inputs):
+    """Create an infinite tf.data.Dataset from the list of numpy arrays.
 
-        for k, sequence in enumerate(sequences):
-            # cannot do 'yield from sequence' because it has no end!
-            for i in range(sequence._num_batches):
-                yield sequence[i]
+    The previous implementation used a Python generator which prevented
+    TensorFlow from overlapping the data preparation with model execution. By
+    converting the generator into a ``tf.data`` pipeline with prefetching we
+    allow for proper pipelining and better performance.
+    """
+
+    def gen():
+        while True:
+            random.shuffle(inputs)
+            for tensors in inputs:
+                sequence = Sequence(*tensors, batch_size)
+                for i in range(sequence._num_batches):
+                    yield sequence[i]
+
+    output_signature = (
+        {
+            "rec_input": tf.TensorSpec(shape=(None, None, None), dtype=tf.int32),
+            "eval_input": tf.TensorSpec(shape=(None, None), dtype=tf.int32),
+        },
+        tf.TensorSpec(shape=(None,), dtype=tf.int32),
+    )
+
+    return (
+        tf.data.Dataset.from_generator(gen, output_signature=output_signature)
+        .prefetch(tf.data.AUTOTUNE)
+    )
 
 
 # load model
@@ -127,25 +141,24 @@ callbacks = get_callbacks(config)
 # train model
 train = config.dataset["train"]
 val = config.dataset["val"]
-batch_size = config.train["batch_size"]
+
+train_ds = make_dataset(train_data)
+val_ds = make_dataset(val_data)
+
 history = model.fit(
-    infinite_gen(train_data),
-    validation_data=infinite_gen(val_data),
-    # batch_size=config.train["batch_size"],
+    train_ds,
+    validation_data=val_ds,
     epochs=config.train["epochs"],
     callbacks=callbacks,
-    # shuffle=True,
     verbose=1,
     steps_per_epoch=train["shots"]
     * len(train["rounds"])
     * len(train["states"])
-    // batch_size
-    + 2,  # +2 is for model.fit to know that the num_rounds coordinate is not fixed
+    // batch_size,
     validation_steps=val["shots"]
     * len(val["rounds"])
     * len(val["states"])
-    // batch_size
-    + 2,  # +2 is for model.fit to know that the num_rounds coordinate is not fixed
+    // batch_size,
 )
 model.save(config.checkpoint_dir / "final_weights.keras")
 
