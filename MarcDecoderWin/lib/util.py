@@ -1,5 +1,5 @@
 import itertools
-import random
+import numpy as np
 
 from qrennd.configs import Config
 from qrennd.layouts import Layout
@@ -13,7 +13,6 @@ from .sequences import Sequence
 
 
 def load_datasets(config: Config, layout: Layout, dataset_name: str):
-    batch_size = config.train["batch_size"]
     experiment_name = config.dataset["folder_format_name"]
 
     input_names = config.dataset["input_names"]
@@ -35,15 +34,14 @@ def load_datasets(config: Config, layout: Layout, dataset_name: str):
         to_inputs(dataset, proj_matrix, input_names=input_names) for dataset in datasets
     ]
 
-    # Process for keras.model input
-    input = [to_model_input(*arrs, data_type=data_type) for arrs in processed]
-    #
-    # sequences = (Sequence(*tensors, batch_size) for tensors in input)
-    # sequences = ((b for b in sequence) for sequence in sequences)
-    # sequences_flattened = itertools.chain.from_iterable(sequences)
-    # sequences_flattened = list(sequences_flattened)
+    # Process for keras.model input and concatenate for tf.data
+    model_inputs = [to_model_input(*arrs, data_type=data_type) for arrs in processed]
+    rec_inputs, eval_inputs, log_errors = zip(*model_inputs)
+    rec_inputs = np.concatenate(rec_inputs, axis=0)
+    eval_inputs = np.concatenate(eval_inputs, axis=0)
+    log_errors = np.concatenate(log_errors, axis=0)
 
-    return input
+    return rec_inputs, eval_inputs, log_errors
 
 
 def load_datasets_backup(

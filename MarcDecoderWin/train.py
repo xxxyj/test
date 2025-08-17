@@ -1,5 +1,4 @@
 import os
-import gc
 import pathlib
 import random
 import numpy as np
@@ -13,7 +12,6 @@ from qrennd import (
 
 from lib.util import load_datasets
 from lib.callbacks import get_callbacks
-from lib.sequences import Sequence
 # from tensorflow.compat.v1 import ConfigProto
 # from tensorflow.compat.v1 import InteractiveSession
 
@@ -81,35 +79,21 @@ print("completed")
 batch_size = config.train["batch_size"]
 
 
-def make_dataset(inputs):
-    """Create an infinite tf.data.Dataset from the list of numpy arrays.
+def make_dataset(rec_input, eval_input, labels, training=False):
+    """Construct a ``tf.data.Dataset`` from numpy arrays.
 
-    The previous implementation used a Python generator which prevented
-    TensorFlow from overlapping the data preparation with model execution. By
-    converting the generator into a ``tf.data`` pipeline with prefetching we
-    allow for proper pipelining and better performance.
+    Using ``from_tensor_slices`` removes Python overhead from the input
+    pipeline, enabling TensorFlow to better overlap input processing with GPU
+    execution. When ``training`` is ``True`` the dataset is shuffled and
+    repeated to provide an infinite stream of data.
     """
 
-    def gen():
-        while True:
-            random.shuffle(inputs)
-            for tensors in inputs:
-                sequence = Sequence(*tensors, batch_size)
-                for i in range(sequence._num_batches):
-                    yield sequence[i]
-
-    output_signature = (
-        {
-            "rec_input": tf.TensorSpec(shape=(None, None, None), dtype=tf.int32),
-            "eval_input": tf.TensorSpec(shape=(None, None), dtype=tf.int32),
-        },
-        tf.TensorSpec(shape=(None,), dtype=tf.int32),
+    dataset = tf.data.Dataset.from_tensor_slices(
+        ({"rec_input": rec_input, "eval_input": eval_input}, labels)
     )
-
-    return (
-        tf.data.Dataset.from_generator(gen, output_signature=output_signature)
-        .prefetch(tf.data.AUTOTUNE)
-    )
+    if training:
+        dataset = dataset.shuffle(len(labels)).repeat()
+    return dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
 
 
 # load model
@@ -139,11 +123,11 @@ callbacks = get_callbacks(config)
 
 
 # train model
-train = config.dataset["train"]
-val = config.dataset["val"]
+train_rec, train_eval, train_labels = train_data
+val_rec, val_eval, val_labels = val_data
 
-train_ds = make_dataset(train_data)
-val_ds = make_dataset(val_data)
+train_ds = make_dataset(train_rec, train_eval, train_labels, training=True)
+val_ds = make_dataset(val_rec, val_eval, val_labels)
 
 history = model.fit(
     train_ds,
@@ -151,14 +135,8 @@ history = model.fit(
     epochs=config.train["epochs"],
     callbacks=callbacks,
     verbose=1,
-    steps_per_epoch=train["shots"]
-    * len(train["rounds"])
-    * len(train["states"])
-    // batch_size,
-    validation_steps=val["shots"]
-    * len(val["rounds"])
-    * len(val["states"])
-    // batch_size,
+    steps_per_epoch=train_rec.shape[0] // batch_size,
+    validation_steps=val_rec.shape[0] // batch_size,
 )
 model.save(config.checkpoint_dir / "final_weights.keras")
 
