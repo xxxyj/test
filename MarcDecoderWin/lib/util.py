@@ -12,6 +12,33 @@ from .preprocessing import (
 from .sequences import Sequence
 
 
+def _pad_and_concat(arrays: tuple[np.ndarray, ...]) -> np.ndarray:
+    """Pad arrays along non-batch dimensions before concatenation.
+
+    Each array is assumed to have the same rank and its first dimension is the
+    batch dimension. The remaining dimensions are padded with zeros so that all
+    arrays share a common shape, allowing them to be concatenated along the
+    batch axis without shape mismatches.
+    """
+
+    if not arrays:
+        return np.array([])
+
+    ndims = arrays[0].ndim
+    # Compute the target size for every non-batch dimension
+    max_shape = [max(arr.shape[i] for arr in arrays) for i in range(1, ndims)]
+
+    padded = []
+    for arr in arrays:
+        pad_width = [(0, 0)]
+        pad_width += [
+            (0, max_dim - arr.shape[i + 1]) for i, max_dim in enumerate(max_shape)
+        ]
+        padded.append(np.pad(arr, pad_width, mode="constant"))
+
+    return np.concatenate(padded, axis=0)
+
+
 def load_datasets(config: Config, layout: Layout, dataset_name: str):
     experiment_name = config.dataset["folder_format_name"]
 
@@ -37,8 +64,8 @@ def load_datasets(config: Config, layout: Layout, dataset_name: str):
     # Process for keras.model input and concatenate for tf.data
     model_inputs = [to_model_input(*arrs, data_type=data_type) for arrs in processed]
     rec_inputs, eval_inputs, log_errors = zip(*model_inputs)
-    rec_inputs = np.concatenate(rec_inputs, axis=0)
-    eval_inputs = np.concatenate(eval_inputs, axis=0)
+    rec_inputs = _pad_and_concat(rec_inputs)
+    eval_inputs = _pad_and_concat(eval_inputs)
     log_errors = np.concatenate(log_errors, axis=0)
 
     return rec_inputs, eval_inputs, log_errors
