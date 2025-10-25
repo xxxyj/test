@@ -1,5 +1,4 @@
 import os
-import gc
 import pathlib
 import random
 import numpy as np
@@ -13,7 +12,6 @@ from qrennd import (
 
 from lib.util import load_datasets
 from lib.callbacks import get_callbacks
-from lib.sequences import Sequence
 # from tensorflow.compat.v1 import ConfigProto
 # from tensorflow.compat.v1 import InteractiveSession
 
@@ -77,25 +75,37 @@ print("loading training data...")
 train_data = load_datasets(config=config, layout=layout, dataset_name="train")
 print("completed")
 
-# this is for model.fit to know that the num_rounds coordinate is not fixed
+# build tf.data pipeline
 batch_size = config.train["batch_size"]
-tensor1, tensor2 = train_data[0], train_data[-1]
-seq1, seq2 = Sequence(*tensor1, batch_size), Sequence(*tensor2, batch_size)
-first_batch, second_batch = seq1[0], seq2[0]
 
 
-def infinite_gen(inputs):
-    while True:
-        random.shuffle(train_data)
-        sequences = (Sequence(*tensors, batch_size) for tensors in inputs)
-        # this is for model.fit to know that the num_rounds coordinate is not fixed
-        yield first_batch
-        yield second_batch
+def make_dataset(rec_input, eval_input, labels, training=False):
+    """Construct a ``tf.data.Dataset`` from numpy arrays.
 
-        for k, sequence in enumerate(sequences):
-            # cannot do 'yield from sequence' because it has no end!
-            for i in range(sequence._num_batches):
-                yield sequence[i]
+    Using ``from_tensor_slices`` removes Python overhead from the input
+    pipeline, enabling TensorFlow to better overlap input processing with GPU
+    execution. When ``training`` is ``True`` the dataset is shuffled and
+    repeated to provide an infinite stream of data.
+    """
+
+    dataset = tf.data.Dataset.from_tensor_slices(
+        ({"rec_input": rec_input, "eval_input": eval_input}, labels)
+    )
+    dataset = dataset.cache()
+    if training:
+        dataset = dataset.shuffle(len(labels)).repeat()
+    dataset = dataset.batch(batch_size)
+
+    # Prefetch to GPU if available to hide host-to-device transfer latency
+    gpus = tf.config.list_physical_devices("GPU")
+    if gpus:
+        dataset = dataset.apply(
+            tf.data.experimental.copy_to_device("/GPU:0")
+        ).prefetch(tf.data.AUTOTUNE)
+    else:
+        dataset = dataset.prefetch(tf.data.AUTOTUNE)
+
+    return dataset
 
 
 # load model
@@ -125,27 +135,20 @@ callbacks = get_callbacks(config)
 
 
 # train model
-train = config.dataset["train"]
-val = config.dataset["val"]
-batch_size = config.train["batch_size"]
+train_rec, train_eval, train_labels = train_data
+val_rec, val_eval, val_labels = val_data
+
+train_ds = make_dataset(train_rec, train_eval, train_labels, training=True)
+val_ds = make_dataset(val_rec, val_eval, val_labels)
+
 history = model.fit(
-    infinite_gen(train_data),
-    validation_data=infinite_gen(val_data),
-    # batch_size=config.train["batch_size"],
+    train_ds,
+    validation_data=val_ds,
     epochs=config.train["epochs"],
     callbacks=callbacks,
-    # shuffle=True,
     verbose=1,
-    steps_per_epoch=train["shots"]
-    * len(train["rounds"])
-    * len(train["states"])
-    // batch_size
-    + 2,  # +2 is for model.fit to know that the num_rounds coordinate is not fixed
-    validation_steps=val["shots"]
-    * len(val["rounds"])
-    * len(val["states"])
-    // batch_size
-    + 2,  # +2 is for model.fit to know that the num_rounds coordinate is not fixed
+    steps_per_epoch=train_rec.shape[0] // batch_size,
+    validation_steps=val_rec.shape[0] // batch_size,
 )
-model.save(config.checkpoint_dir / "final_weights.keras")
+model.save_weights(config.checkpoint_dir / "final_weights.h5")
 

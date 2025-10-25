@@ -13,10 +13,10 @@ from qrennd.configs import Config
 
 def get_filename(params: Dict[str, Any]) -> str:
     if params["save_best_only"]:
-        filename = "weights.keras"
+        filename = "weights.h5"
         return filename
 
-    filename = f"weights-{{epoch}}-{{{params['monitor']}}}.keras"
+    filename = f"weights-{{epoch}}-{{{params['monitor']}}}.h5"
     return filename
 
 
@@ -26,6 +26,7 @@ def get_callbacks(config: Config) -> Tuple[Callback]:
     checkpoint_filename = get_filename(params["checkpoint"])
     model_checkpoint = ModelCheckpoint(
         filepath=str(config.checkpoint_dir / checkpoint_filename),
+        save_weights_only=True,
         **params["checkpoint"],
     )
 
